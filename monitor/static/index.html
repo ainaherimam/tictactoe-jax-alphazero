@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jax_az · AlphaZero monitor</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0d1117; --bg2:#0a0e14; --panel:#161b22; --panel2:#1b222c; --line:#2a313c;
+    --fg:#e6edf3; --mut:#8b949e; --dim:#6e7681;
+    --acc:#4fd1c5; --acc2:#58a6ff; --good:#3fb950; --warn:#d29922; --bad:#f85149; --purple:#bc8cff;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --r:10px;
+  }
+  *{box-sizing:border-box;}
+  [hidden]{display:none!important;}   /* beats main{display:grid} so tab switching hides views */
+  body{margin:0;font:13px/1.5 var(--sans);background:var(--bg);color:var(--fg);}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums;}
+
+  /* header */
+  header{display:flex;align-items:center;gap:16px;padding:11px 20px;
+    background:linear-gradient(180deg,#161b22,#11161d);border-bottom:1px solid var(--line);
+    position:sticky;top:0;z-index:10;}
+  header .brand{font-weight:700;font-size:15px;letter-spacing:.3px;
+    background:linear-gradient(90deg,var(--acc),var(--acc2));-webkit-background-clip:text;background-clip:text;color:transparent;}
+  header .brand small{color:var(--dim);font-weight:400;font-size:11px;margin-left:6px;-webkit-text-fill-color:var(--dim);}
+  .tabs{display:flex;gap:4px;background:var(--bg2);padding:3px;border-radius:9px;border:1px solid var(--line);}
+  .tab{background:transparent;color:var(--mut);border:0;border-radius:6px;padding:6px 16px;cursor:pointer;font:inherit;font-weight:600;transition:.15s;}
+  .tab:hover{color:var(--fg);}
+  .tab.active{background:var(--panel2);color:var(--acc);box-shadow:0 1px 3px rgba(0,0,0,.4);}
+  .spacer{flex:1;}
+  .runpick{display:flex;align-items:center;gap:7px;color:var(--mut);}
+  .runpick select{font:inherit;background:var(--bg2);color:var(--fg);border:1px solid var(--line);border-radius:7px;padding:6px 9px;max-width:300px;}
+  .badge{padding:3px 10px;border-radius:20px;background:#222c38;color:var(--mut);font-size:11px;font-weight:600;font-family:var(--mono);}
+  .badge.running{color:#0d1117;background:var(--good);} .badge.starting{color:#0d1117;background:var(--warn);}
+  .badge.error,.badge.dead{color:#0d1117;background:var(--bad);} .badge.finished{color:#0d1117;background:var(--acc);}
+  .badge.stopped{color:#0d1117;background:var(--warn);} .badge.none{opacity:.6;}
+  .clock{color:var(--dim);font-family:var(--mono);font-size:12px;}
+
+  /* layout */
+  main{display:grid;grid-template-columns:312px 1fr;gap:16px;padding:16px;align-items:start;}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);}
+  .panel.pad{padding:14px 16px;}
+  .panel-h{display:flex;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);}
+  .panel-h h2{margin:0;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);}
+  .panel-h .pill{margin-left:auto;font-size:11px;color:var(--dim);font-family:var(--mono);}
+
+  /* config form */
+  .form h3{margin:16px 0 7px;font-size:11px;color:var(--acc);text-transform:uppercase;letter-spacing:.08em;
+    border-bottom:1px solid var(--line);padding-bottom:5px;}
+  .form h3:first-child{margin-top:0;}
+  .form label{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:6px 0;color:var(--mut);}
+  .form label span{font-size:12px;}
+  .form input,.form select{width:140px;background:var(--bg2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 7px;font:inherit;font-family:var(--mono);}
+  .form input:focus,.form select:focus,.runpick select:focus{outline:0;border-color:var(--acc);}
+  .form input[type=checkbox]{width:auto;accent-color:var(--acc);}
+  .namerow{display:flex;flex-direction:column;gap:5px;margin-bottom:6px;}
+  .namerow span{color:var(--mut);font-size:12px;}
+  .namerow input{background:var(--bg2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:inherit;}
+
+  button{font:inherit;font-weight:600;cursor:pointer;}
+  .btn{width:100%;margin-top:8px;padding:9px;border:0;border-radius:8px;transition:.15s;}
+  .btn:hover{filter:brightness(1.1);}
+  .btn.primary{background:linear-gradient(90deg,var(--acc),#3bb8ad);color:#06231f;}
+  .btn.blue{background:linear-gradient(90deg,var(--acc2),#4790e8);color:#04183a;}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--fg);}
+  .btn.danger{background:transparent;border:1px solid var(--bad);color:var(--bad);}
+  .btn.success{background:transparent;border:1px solid var(--good);color:var(--good);}
+  .btn:disabled{opacity:.4;cursor:not-allowed;filter:none;}
+  .btnrow{display:flex;gap:8px;}
+  .btnrow .btn{margin-top:8px;}
+
+  /* cards */
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:12px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;transition:.15s;}
+  .card:hover{border-color:#3a4452;}
+  .card .k{color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.05em;}
+  .card .v{font-size:22px;margin-top:4px;font-family:var(--mono);font-variant-numeric:tabular-nums;}
+  .card .v.acc{color:var(--acc);} .card .v.good{color:var(--good);} .card .v.warn{color:var(--warn);}
+  .card .sub{color:var(--dim);font-size:11px;margin-top:2px;font-family:var(--mono);}
+
+  /* progress / ring */
+  .prog{height:7px;background:var(--bg2);border-radius:4px;overflow:hidden;margin-top:7px;}
+  .prog>div{height:100%;background:linear-gradient(90deg,var(--acc),var(--good));width:0%;transition:width .4s;}
+  .ring{height:20px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;overflow:hidden;}
+  .ring>div{height:100%;background:linear-gradient(90deg,var(--acc),var(--good));width:0%;transition:width .4s;}
+
+  /* charts */
+  .charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+  .chartbox{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;}
+  .chartbox h4{margin:0 0 10px;font-size:12px;color:var(--fg);font-weight:600;display:flex;align-items:center;gap:7px;}
+  .chartbox h4::before{content:"";width:7px;height:7px;border-radius:2px;background:var(--acc);}
+  .stack{display:flex;flex-direction:column;gap:16px;}
+
+  .ck{display:flex;flex-wrap:wrap;gap:6px;}
+  .ck span{background:var(--bg2);border:1px solid var(--line);padding:3px 9px;border-radius:6px;color:var(--good);font-family:var(--mono);font-size:11px;}
+  pre.log{max-height:200px;overflow:auto;background:var(--bg2);padding:10px 12px;border-radius:8px;color:#9fe6c9;
+    white-space:pre-wrap;font-family:var(--mono);font-size:11.5px;margin:0;border:1px solid var(--line);}
+
+  /* eval table */
+  .tablewrap{overflow:auto;border-radius:8px;border:1px solid var(--line);}
+  table.data{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px;}
+  table.data th,table.data td{text-align:right;padding:7px 11px;border-bottom:1px solid var(--line);white-space:nowrap;}
+  table.data th:first-child,table.data td:first-child{text-align:left;}
+  table.data th{color:var(--mut);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0;background:var(--panel2);}
+  table.data tr:hover td{background:#1b232d;}
+  table.data td.best{color:var(--good);font-weight:700;}
+
+  /* runs table */
+  table.runs{width:100%;border-collapse:collapse;}
+  table.runs th,table.runs td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);}
+  table.runs th{color:var(--mut);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em;}
+  table.runs tr.row{cursor:pointer;transition:.1s;}
+  table.runs tr.row:hover{background:#1b232d;}
+  table.runs tr.sel{background:#1e2935;}
+  table.runs td.num{font-family:var(--mono);}
+  table.runs td.act button{background:transparent;border:1px solid var(--line);color:var(--fg);border-radius:6px;padding:4px 11px;margin-right:5px;font-size:12px;}
+  table.runs td.act button.r{color:var(--good);border-color:var(--good);}
+  table.runs td.act button.s{color:var(--bad);border-color:var(--bad);}
+  .hint{color:var(--dim);font-size:12px;}
+  .empty{color:var(--dim);text-align:center;padding:40px;}
+
+  @media(max-width:980px){main{grid-template-columns:1fr;} .charts{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">jax_az<small>AlphaZero · Misère 4×4</small></span>
+  <div class="tabs">
+    <button class="tab active" data-view="train">🏋 Train</button>
+    <button class="tab" data-view="eval">📊 Eval</button>
+    <button class="tab" data-view="data">📈 Data</button>
+    <button class="tab" data-view="runs">🗂 Runs</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="runpick">run <select id="runSel"></select></div>
+  <span id="stateBadge" class="badge none">—</span>
+  <span id="deviceBadge" class="badge"></span>
+  <span id="clock" class="clock"></span>
+</header>
+
+<!-- ============================ TRAIN ============================ -->
+<main id="viewTrain">
+  <div class="panel">
+    <div class="panel-h"><h2>New run · config</h2></div>
+    <div class="pad form">
+      <div class="namerow"><span>run name</span><input id="runName" placeholder="(auto timestamp)"></div>
+      <div id="formFields"></div>
+      <button class="btn primary" id="launchBtn">▶ Launch run</button>
+      <div class="btnrow">
+        <button class="btn success" id="resumeBtn">⟳ Resume</button>
+        <button class="btn danger" id="stopBtn">■ Stop</button>
+      </div>
+      <div class="hint" style="margin-top:8px">Resume / Stop act on the selected run.</div>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="cards" id="cards"></div>
+    <div class="chartbox">
+      <h4>Replay ring buffer</h4>
+      <div class="ring"><div id="ringFill"></div></div>
+      <div id="ringText" class="hint" style="margin-top:6px"></div>
+    </div>
+    <div class="charts">
+      <div class="chartbox"><h4>Loss (total / policy / value)</h4><canvas id="cLoss" height="150"></canvas></div>
+      <div class="chartbox"><h4>Policy entropy &amp; value accuracy</h4><canvas id="cAux" height="150"></canvas></div>
+      <div class="chartbox"><h4>Solver agreement (NN / MCTS top-1)</h4><canvas id="cSolver" height="150"></canvas></div>
+      <div class="chartbox"><h4>Throughput (games/s, samples/s)</h4><canvas id="cThru" height="150"></canvas></div>
+    </div>
+    <div class="chartbox"><h4>Checkpoints</h4><div class="ck" id="ckList"></div></div>
+    <div class="chartbox"><h4>Trainer log (tail)</h4><pre class="log" id="logBox"></pre></div>
+  </div>
+</main>
+
+<!-- ============================ EVAL ============================ -->
+<main id="viewEval" hidden>
+  <div class="panel">
+    <div class="panel-h"><h2>AZ vs perfect solver</h2></div>
+    <div class="pad form">
+      <div class="namerow"><span>evaluating run</span>
+        <input id="evRunName" readonly placeholder="(select a run above)"></div>
+      <h3>Target</h3>
+      <label><span>checkpoint</span><select id="evTarget"></select></label>
+      <h3>Hyperparameters</h3>
+      <div id="evalFields"></div>
+      <button class="btn blue" id="evalBtn">▶ Run evaluation</button>
+      <button class="btn danger" id="evalStopBtn">■ Stop eval</button>
+      <div id="evalProg" style="margin-top:12px"></div>
+      <div class="hint" style="margin-top:6px">Eval is greedy (temp 0, no Dirichlet). 4 theory groups × per-group games.</div>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="cards" id="evalCards"></div>
+    <div class="charts">
+      <div class="chartbox"><h4>Elo vs perfect solver</h4><canvas id="eElo" height="150"></canvas></div>
+      <div class="chartbox"><h4>Theory-matched outcomes (W / D / L)</h4><canvas id="eWDL" height="150"></canvas></div>
+      <div class="chartbox"><h4>Blunder rate (%) &amp; games with blunder</h4><canvas id="eBlunder" height="150"></canvas></div>
+      <div class="chartbox"><h4>Per-group theory score (%)</h4><canvas id="eGroups" height="150"></canvas></div>
+      <div class="chartbox"><h4>Policy vs solver — no search (optimal-move &amp; value acc)</h4><canvas id="ePolicy" height="150"></canvas></div>
+      <div class="chartbox"><h4>Policy regret &amp; value MSE (lower = better)</h4><canvas id="eRegret" height="150"></canvas></div>
+    </div>
+    <div class="chartbox">
+      <h4>Results per checkpoint</h4>
+      <div class="tablewrap"><table class="data" id="evalTable"></table></div>
+    </div>
+    <div class="chartbox"><h4>Eval log (tail)</h4><pre class="log" id="evalLogBox"></pre></div>
+  </div>
+</main>
+
+<!-- ============================ DATA ============================ -->
+<section id="viewData" hidden style="padding:16px;">
+  <div class="panel">
+    <div class="panel-h"><h2>Replay-buffer data analysis</h2><span class="pill" id="dataStatus">—</span></div>
+    <div class="pad">
+      <button class="btn blue" id="analyzeBtn">▶ Analyze replay</button>
+      <span class="hint" id="dataHint" style="margin-left:10px"></span>
+    </div>
+  </div>
+  <iframe id="dataFrame" style="width:100%;height:calc(100vh - 210px);border:1px solid var(--line);border-radius:10px;margin-top:12px;background:#0f1115"></iframe>
+</section>
+
+<!-- ============================ RUNS ============================ -->
+<section id="viewRuns" hidden style="padding:16px;">
+  <div class="panel">
+    <div class="panel-h"><h2>All runs</h2><span class="pill" id="runsCount"></span></div>
+    <table class="runs">
+      <thead><tr><th>run</th><th>state</th><th>progress</th><th>loss</th><th>solver nn</th><th>eval elo</th><th>started</th><th>actions</th></tr></thead>
+      <tbody id="runsBody"></tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+const $ = s => document.querySelector(s);
+const j = async (u, opt) => (await fetch(u, opt)).json();
+const POST = (u, b) => j(u, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(b)});
+const fmt = (x,d=3)=> (x===undefined||x===null||x==="")?"–":(typeof x==="number"?(Number.isInteger(x)?x:x.toFixed(d)):x);
+const fmtDur = s => { if(s==null||!isFinite(s))return "–"; s=Math.round(s); const h=Math.floor(s/3600),m=Math.floor(s%3600/60),ss=s%60; return h?`${h}h${m}m`:m?`${m}m${ss}s`:`${ss}s`; };
+
+const OPTIONS = {
+  "device":["auto","cpu","gpu"],
+  "search.algorithm":["muzero","gumbel"],
+  "train.lr_schedule":["constant","cosine"],
+  "train.variant":["v1_scalar_mse","v2_softmax_ce","v3_softmax_mse","v4_tanh_per_bin_mse","v5_independent_bce","v6_scalar_l1"],
+};
+const SECTION_TITLE = {game:"Game", search:"Search (MCTS)", loop:"Self-play / Replay", train:"Network · Train · Optim"};
+let DEFAULTS=null, curRun=null, lastRuns=[];
+
+/* ---- generic config field builder (shared by train form + eval form) ---- */
+function field(path, val){
+  const wrap=document.createElement("label");
+  const name=document.createElement("span"); name.textContent=path.split(".").pop(); wrap.appendChild(name);
+  let inp;
+  if(OPTIONS[path]){ inp=document.createElement("select"); for(const o of OPTIONS[path]){const e=document.createElement("option"); e.value=e.textContent=o; inp.appendChild(e);} inp.value=val; }
+  else if(typeof val==="boolean"){ inp=document.createElement("input"); inp.type="checkbox"; inp.checked=val; }
+  else if(val===null){ inp=document.createElement("input"); inp.type="text"; inp.placeholder="None"; inp.value=""; }
+  else if(Array.isArray(val)){ inp=document.createElement("input"); inp.type="text"; inp.dataset.json="1"; inp.placeholder="[[1,2.0],[6,1.0]]"; inp.value=val.length?JSON.stringify(val):""; }
+  else { inp=document.createElement("input"); inp.type="number"; inp.step="any"; inp.value=val; }
+  inp.dataset.path=path; wrap.appendChild(inp); return wrap;
+}
+function readFields(rootSel){
+  const out={};
+  document.querySelectorAll(rootSel+" [data-path]").forEach(inp=>{
+    const path=inp.dataset.path;
+    let val;
+    if(inp.type==="checkbox") val=inp.checked;
+    else if(inp.dataset.json) val=inp.value.trim()===""?[]:JSON.parse(inp.value);
+    else if(OPTIONS[path]) val=inp.value;
+    else if(inp.type==="number") val=inp.value===""?null:Number(inp.value);
+    else val=inp.value===""?null:inp.value;
+    out[path]=val;
+  });
+  return out;
+}
+
+/* ---- train config form ---- */
+function buildForm(def){
+  const root=$("#formFields"); root.innerHTML="";
+  for(const k of ["seed","device"]) root.appendChild(field(k, def[k]));
+  for(const sec of ["game","search","loop","train"]){
+    const h=document.createElement("h3"); h.textContent=SECTION_TITLE[sec]; root.appendChild(h);
+    for(const [k,v] of Object.entries(def[sec])) root.appendChild(field(sec+"."+k, v));
+  }
+}
+function readForm(){
+  const flat=readFields("#formFields"), cfg={game:{},search:{},loop:{},train:{}};
+  for(const [path,val] of Object.entries(flat)){
+    const p=path.split("."); if(p.length===1) cfg[p[0]]=val; else cfg[p[0]][p[1]]=val;
+  }
+  const nm=$("#runName").value.trim(); if(nm) cfg.name=nm;
+  return cfg;
+}
+/* ---- eval hyperparam form ---- */
+function buildEvalForm(def){
+  const root=$("#evalFields"); root.innerHTML="";
+  for(const [k,v] of Object.entries(def.eval)) root.appendChild(field("eval."+k, v));
+}
+
+/* ---- charts ---- */
+const PAL=["#4fd1c5","#f6ad55","#fc8181","#68d391","#90cdf4","#d6bcfa"];
+function mkChart(id, series, opt={}){
+  return new Chart($(id), {
+    type:"line",
+    data:{datasets: series.map((s,i)=>({label:s, data:[], borderColor:PAL[i%PAL.length],
+      backgroundColor:PAL[i%PAL.length], pointRadius:opt.points?2.5:0, borderWidth:1.8, tension:.2, spanGaps:true}))},
+    options:{animation:false, parsing:false, normalized:true, maintainAspectRatio:true,
+      scales:{x:{type:"linear", title:opt.xt?{display:true,text:opt.xt,color:"#6e7681"}:undefined, ticks:{color:"#8b949e"}, grid:{color:"#1e2733"}},
+              y:{title:opt.yt?{display:true,text:opt.yt,color:"#6e7681"}:undefined, ticks:{color:"#8b949e"}, grid:{color:"#1e2733"}, ...(opt.y||{})}},
+      plugins:{legend:{labels:{color:"#c9d1d9", boxWidth:10, font:{family:"ui-monospace"}}}}}
+  });
+}
+let tc={}, ec={};
+function initCharts(){
+  tc.loss   = mkChart("#cLoss",   ["loss","policy_loss","value_loss"], {xt:"generation"});
+  tc.aux    = mkChart("#cAux",    ["policy_entropy","value_accuracy"], {xt:"generation"});
+  tc.solver = mkChart("#cSolver", ["solver_acc_nn","solver_acc_mcts"], {xt:"generation"});
+  tc.thru   = mkChart("#cThru",   ["games_per_sec","samples_per_sec"], {xt:"generation"});
+  ec.elo    = mkChart("#eElo",    ["elo"], {xt:"checkpoint", yt:"Elo", points:true});
+  ec.wdl    = mkChart("#eWDL",    ["wins","draws","losses"], {xt:"checkpoint", points:true});
+  ec.bl     = mkChart("#eBlunder",["blunder_rate_%","games_w_blunder"], {xt:"checkpoint", points:true, y:{min:0}});
+  ec.grp    = mkChart("#eGroups", ["X-first X-wins","O-first X-wins","X-first Draw","O-first Draw"], {xt:"checkpoint", yt:"%", points:true, y:{min:0,max:100}});
+  ec.pol    = mkChart("#ePolicy", ["optimal_move_rate","value_class_acc"], {xt:"checkpoint", points:true, y:{min:0,max:1}});
+  ec.reg    = mkChart("#eRegret", ["policy_regret","value_mse"], {xt:"checkpoint", points:true, y:{min:0}});
+}
+const push=(c,di,x,y)=>{ if(y!==undefined&&y!==null) c.data.datasets[di].data.push({x,y}); };
+
+/* ======================= TRAIN view ======================= */
+let trainSince=0;
+function setCards(last,total){
+  const gen=last.gen, remain=(total!=null&&gen!=null)?Math.max(0,total-gen):null;
+  const eta=(remain!=null&&last.dt)?remain*last.dt:null;
+  const progPct=total?Math.min(100,100*(gen+1)/total):0;
+  const card=(k,v,cls="",sub="")=>`<div class="card"><div class="k">${k}</div><div class="v ${cls}">${v}</div>${sub?`<div class="sub">${sub}</div>`:""}</div>`;
+  $("#cards").innerHTML=[
+    `<div class="card"><div class="k">generation</div><div class="v acc">${fmt(gen,0)}${total?` <span style="color:var(--dim);font-size:14px">/ ${total}</span>`:""}</div><div class="prog"><div style="width:${progPct.toFixed(1)}%"></div></div></div>`,
+    card("eta", fmtDur(eta)),
+    card("games total", fmt(last.games_total,0)),
+    card("loss", fmt(last.loss)),
+    card("value acc", fmt(last.value_accuracy), "good"),
+    card("solver acc (nn)", fmt(last.solver_acc_nn), "good"),
+    card("games/s", fmt(last.games_per_sec,1)),
+    card("samples/s", fmt(last.samples_per_sec,0)),
+  ].join("");
+  const cap=last.capacity||1, fill=last.filled||0, pct=Math.min(100,100*fill/cap);
+  $("#ringFill").style.width=pct.toFixed(1)+"%";
+  $("#ringText").textContent=`${Math.round(fill).toLocaleString()} / ${cap.toLocaleString()} positions (${pct.toFixed(1)}%) · cursor ${last.cursor??"–"}`;
+}
+function applyTrain(recs){
+  for(const r of recs){ const g=r.gen;
+    push(tc.loss,0,g,r.loss); push(tc.loss,1,g,r.policy_loss); push(tc.loss,2,g,r.value_loss);
+    push(tc.aux,0,g,r.policy_entropy); push(tc.aux,1,g,r.value_accuracy);
+    push(tc.solver,0,g,r.solver_acc_nn); push(tc.solver,1,g,r.solver_acc_mcts);
+    push(tc.thru,0,g,r.games_per_sec); push(tc.thru,1,g,r.samples_per_sec);
+  }
+  for(const c of Object.values(tc)) c.update("none");
+}
+async function trainTick(){
+  if(!curRun) return;
+  const st=await j("/api/run?id="+encodeURIComponent(curRun));
+  const b=$("#stateBadge"); b.textContent=st.state; b.className="badge "+st.state;
+  $("#deviceBadge").textContent=st.config?.device?"device:"+st.config.device:"";
+  const total=st.config?.loop?.num_generations??null;
+  if(st.last&&Object.keys(st.last).length) setCards(st.last,total);
+  $("#ckList").innerHTML=(st.checkpoints||[]).map(g=>`<span>ckpt ${g}</span>`).join("")||'<span style="color:var(--dim);background:none;border:0">none yet</span>';
+  if(st.error) $("#logBox").textContent=st.error;
+  else { const log=await fetch("/api/log?id="+encodeURIComponent(curRun)).then(r=>r.text()); $("#logBox").textContent=log; $("#logBox").scrollTop=1e9; }
+  const m=await j(`/api/metrics?id=${encodeURIComponent(curRun)}&since=${trainSince}`);
+  if(m.records&&m.records.length){ applyTrain(m.records); trainSince=m.next; }
+}
+
+/* ======================= EVAL view ======================= */
+let evalCkSig="";   // signature of the target dropdown so we only rebuild on change
+const GROUPS=[["xfirst_xwins","X-first X-wins"],["ofirst_xwins","O-first X-wins"],["xfirst_draw","X-first Draw"],["ofirst_draw","O-first Draw"]];
+const groupScore=(r,p)=>{ const W=r[p+"_W"],D=r[p+"_D"],L=r[p+"_L"],n=W+D+L; return n?100*(W+0.5*D)/n:null; };
+
+function fillEvalTarget(checkpoints){
+  const sig=curRun+"|"+checkpoints.join(",");
+  if(sig===evalCkSig) return; evalCkSig=sig;
+  const sel=$("#evTarget"), prev=sel.value; sel.innerHTML="";
+  const all=document.createElement("option"); all.value="all"; all.textContent=`Whole run — sweep all ${checkpoints.length}`; sel.appendChild(all);
+  for(const g of checkpoints){ const o=document.createElement("option"); o.value=String(g); o.textContent=`checkpoint_${g}`; sel.appendChild(o); }
+  if(prev&&[...sel.options].some(o=>o.value===prev)) sel.value=prev;
+}
+function setEvalCards(rows){
+  const card=(k,v,cls="",sub="")=>`<div class="card"><div class="k">${k}</div><div class="v ${cls}">${v}</div>${sub?`<div class="sub">${sub}</div>`:""}</div>`;
+  if(!rows.length){ $("#evalCards").innerHTML=card("status","no eval yet","",""); return; }
+  const last=rows[rows.length-1];
+  let best=rows[0]; for(const r of rows) if(r.elo>best.elo) best=r;
+  let bestOpt=rows[0]; for(const r of rows) if((r.optimal_move_rate??-1)>(bestOpt.optimal_move_rate??-1)) bestOpt=r;
+  const has=v=>v!==undefined&&v!==null;
+  $("#evalCards").innerHTML=[
+    card("checkpoints", rows.length, "acc"),
+    card("best elo", fmt(best.elo,1), "good", `ckpt ${best.checkpoint}`),
+    card("latest elo", fmt(last.elo,1), "", `ckpt ${last.checkpoint}`),
+    has(bestOpt.optimal_move_rate)?card("best opt-move", fmt(bestOpt.optimal_move_rate*100,1)+"%", "good", `ckpt ${bestOpt.checkpoint}`):"",
+    has(last.optimal_move_rate)?card("opt-move (no search)", fmt(last.optimal_move_rate*100,1)+"%", "", `ckpt ${last.checkpoint}`):"",
+    has(last.value_class_acc)?card("value acc (no search)", fmt(last.value_class_acc*100,1)+"%", ""):"",
+    card("blunder rate", fmt(last.blunder_rate_pct,2)+"%", "warn"),
+    card("W / D / L", `${last.theory_wins}/${last.theory_draws}/${last.theory_losses}`, ""),
+  ].join("");
+}
+function applyEval(rows){
+  rows=[...rows].sort((a,b)=>a.checkpoint-b.checkpoint);
+  for(const c of Object.values(ec)) c.data.datasets.forEach(d=>d.data=[]);
+  for(const r of rows){ const x=r.checkpoint;
+    push(ec.elo,0,x,r.elo);
+    push(ec.wdl,0,x,r.theory_wins); push(ec.wdl,1,x,r.theory_draws); push(ec.wdl,2,x,r.theory_losses);
+    push(ec.bl,0,x,r.blunder_rate_pct); push(ec.bl,1,x,r.games_with_blunder);
+    GROUPS.forEach(([p],i)=>push(ec.grp,i,x,groupScore(r,p)));
+    push(ec.pol,0,x,r.optimal_move_rate); push(ec.pol,1,x,r.value_class_acc);
+    push(ec.reg,0,x,r.policy_regret); push(ec.reg,1,x,r.value_mse);
+  }
+  for(const c of Object.values(ec)) c.update("none");
+  // table
+  const cols=[["checkpoint","ckpt"],["elo","Elo"],["score","score"],
+    ["optimal_move_rate","opt move%"],["value_class_acc","value acc%"],["policy_regret","regret"],["value_mse","val mse"],
+    ["theory_wins","W"],["theory_draws","D"],["theory_losses","L"],
+    ["blunder_rate_pct","blunder%"],["total_blunders","blunders"],["games_with_blunder","games w/bl"],
+    ["win_to_loss","W→L"],["draw_to_loss","D→L"]];
+  const pct=new Set(["score","optimal_move_rate","value_class_acc"]);
+  let best=rows[0]||{}; for(const r of rows) if(r.elo>(best.elo??-1e9)) best=r;
+  const head="<thead><tr>"+cols.map(c=>`<th>${c[1]}</th>`).join("")+"</tr></thead>";
+  const bodyRows=[...rows].sort((a,b)=>b.checkpoint-a.checkpoint).map(r=>"<tr>"+cols.map(([k])=>{
+    let v=r[k];
+    if(pct.has(k)) v=(v==null)?"–":fmt(v*100,1)+"%";
+    else if(k==="policy_regret"||k==="value_mse") v=fmt(v,4);
+    else if(k==="elo"||k==="blunder_rate_pct") v=fmt(v,k==="elo"?1:2);
+    else v=fmt(v,0);
+    return `<td class="${k==='elo'&&r.checkpoint===best.checkpoint?'best':''}">${v}</td>`;
+  }).join("")+"</tr>").join("");
+  $("#evalTable").innerHTML=head+"<tbody>"+(bodyRows||`<tr><td colspan="${cols.length}" class="empty">run an evaluation to see results</td></tr>`)+"</tbody>";
+}
+function setEvalProg(ev){
+  const running=ev.state==="running"||ev.state==="starting";
+  $("#evalBtn").disabled=running; $("#evalStopBtn").disabled=!running;
+  let html="";
+  if(ev.state&&ev.state!=="none"){
+    const pct=ev.total?Math.min(100,100*ev.done/ev.total):(running?5:100);
+    html=`<div style="display:flex;justify-content:space-between"><span class="badge ${ev.state}">${ev.state}</span>`+
+         `<span class="hint">${ev.done||0}/${ev.total||"?"}${ev.last_gen!=null?` · ckpt ${ev.last_gen}`:""}</span></div>`+
+         `<div class="prog" style="margin-top:7px"><div style="width:${pct.toFixed(1)}%"></div></div>`;
+  }
+  $("#evalProg").innerHTML=html;
+}
+async function evalTick(){
+  if(!curRun){ $("#evRunName").value=""; return; }
+  $("#evRunName").value=curRun;
+  const st=await j("/api/run?id="+encodeURIComponent(curRun));
+  fillEvalTarget(st.checkpoints||[]);
+  $("#deviceBadge").textContent=st.config?.device?"device:"+st.config.device:"";
+  const ev=await j("/api/eval?id="+encodeURIComponent(curRun));
+  setEvalProg(ev);
+  setEvalCards(ev.rows||[]);
+  applyEval(ev.rows||[]);
+  const log=await fetch("/api/eval_log?id="+encodeURIComponent(curRun)).then(r=>r.text());
+  $("#evalLogBox").textContent=log||"(no eval run yet)"; $("#evalLogBox").scrollTop=1e9;
+}
+
+/* ======================= RUNS view ======================= */
+function renderRuns(){
+  $("#runsCount").textContent=lastRuns.length+" runs";
+  const body=$("#runsBody"); body.innerHTML="";
+  if(!lastRuns.length){ body.innerHTML=`<tr><td colspan="8" class="empty">no runs yet — launch one from the Train tab</td></tr>`; return; }
+  for(const r of lastRuns){
+    const total=r.config?.loop?.num_generations, gen=r.last?.gen;
+    const prog=(total!=null&&gen!=null)?`${gen} / ${total}`:(gen!=null?`${gen}`:"–");
+    const started=r.started_at?new Date(r.started_at*1000).toLocaleString():"–";
+    const tr=document.createElement("tr");
+    tr.className="row"+(r.run_id===curRun?" sel":"");
+    tr.innerHTML=
+      `<td>${r.run_id}</td><td><span class="badge ${r.state}">${r.state}</span></td>`+
+      `<td class="num">${prog}</td><td class="num">${fmt(r.last?.loss)}</td><td class="num">${fmt(r.last?.solver_acc_nn)}</td>`+
+      `<td class="num">${fmt(r.eval_elo,1)}</td><td>${started}</td>`+
+      `<td class="act"><button class="v">View</button>`+
+      (r.alive?`<button class="s">Stop</button>`:`<button class="r">Resume</button>`)+`</td>`;
+    tr.querySelector("button.v").onclick=e=>{e.stopPropagation(); viewRun(r.run_id);};
+    const sB=tr.querySelector("button.s"); if(sB) sB.onclick=async e=>{e.stopPropagation(); await POST("/api/stop",{id:r.run_id}); refreshRunList();};
+    const rB=tr.querySelector("button.r"); if(rB) rB.onclick=async e=>{e.stopPropagation(); await POST("/api/resume",{id:r.run_id}); viewRun(r.run_id);};
+    tr.onclick=()=>viewRun(r.run_id);
+    body.appendChild(tr);
+  }
+}
+
+/* ======================= shared / polling ======================= */
+let activeView="train";
+function showView(v){
+  activeView=v;
+  $("#viewTrain").hidden=v!=="train"; $("#viewEval").hidden=v!=="eval"; $("#viewData").hidden=v!=="data"; $("#viewRuns").hidden=v!=="runs";
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active", t.dataset.view===v));
+  tickActive();
+}
+function viewRun(id){ $("#runSel").value=id; selectRun(id); showView("train"); }
+function selectRun(id){
+  curRun=id; trainSince=0; evalCkSig="";
+  for(const c of Object.values(tc)){ c.data.datasets.forEach(d=>d.data=[]); c.update("none"); }
+  for(const c of Object.values(ec)){ c.data.datasets.forEach(d=>d.data=[]); c.update("none"); }
+}
+async function refreshRunList(){
+  const runs=await j("/api/runs"); lastRuns=runs;
+  const sel=$("#runSel"), prev=sel.value; sel.innerHTML="";
+  for(const r of runs){ const o=document.createElement("option"); o.value=r.run_id; o.textContent=`${r.run_id} · ${r.state}`; sel.appendChild(o); }
+  if(curRun&&[...sel.options].some(o=>o.value===curRun)) sel.value=curRun;
+  else if(prev&&[...sel.options].some(o=>o.value===prev)) sel.value=prev;
+  if(activeView==="runs") renderRuns();
+}
+function tickActive(){
+  if(activeView==="train") trainTick().catch(()=>{});
+  else if(activeView==="eval") evalTick().catch(()=>{});
+  else if(activeView==="data") dataTick().catch(()=>{});
+}
+
+/* ---- replay data analysis ---- */
+let dataSig="";
+async function dataTick(){
+  const b=$("#analyzeBtn"), fr=$("#dataFrame");
+  if(!curRun){ $("#dataStatus").textContent="—"; $("#dataHint").textContent=""; b.disabled=true; return; }
+  const st=await j("/api/analyze?id="+encodeURIComponent(curRun));
+  b.disabled=st.running;
+  $("#dataStatus").textContent=st.running?"analyzing…":st.has_report?"report ready":"not analyzed";
+  $("#dataHint").textContent=st.running?"scanning replay + solving, ~1 min":"";
+  const sig=st.has_report?curRun+":"+st.mtime:curRun+":none";
+  if(sig!==dataSig){ dataSig=sig;
+    if(st.has_report) fr.src="/api/replay?id="+encodeURIComponent(curRun)+"&t="+st.mtime;
+    else fr.removeAttribute("src");
+  }
+}
+function loop(){ refreshRunList().catch(()=>{}); tickActive(); }
+
+/* ---- wire up ---- */
+document.querySelectorAll(".tab").forEach(t=>t.addEventListener("click",()=>showView(t.dataset.view)));
+$("#runSel").addEventListener("change", e=>{ selectRun(e.target.value); tickActive(); });
+$("#launchBtn").addEventListener("click", async ()=>{
+  const res=await POST("/api/launch", readForm());
+  $("#runName").value="";
+  await refreshRunList(); $("#runSel").value=res.run_id; selectRun(res.run_id); showView("train"); trainTick();
+});
+$("#resumeBtn").addEventListener("click", async ()=>{ if(!curRun) return; await POST("/api/resume",{id:curRun}); selectRun(curRun); });
+$("#stopBtn").addEventListener("click", async ()=>{ if(curRun&&confirm("Stop run "+curRun+"?")) await POST("/api/stop",{id:curRun}); });
+$("#evalBtn").addEventListener("click", async ()=>{
+  if(!curRun){ alert("Select a run first."); return; }
+  const f=readFields("#evalFields");
+  const body={id:curRun, target:$("#evTarget").value,
+    sims:f["eval.sims"], per_group:f["eval.per_group"], seed:f["eval.seed"], pgn:f["eval.pgn"]};
+  const r=await POST("/api/eval", body);
+  if(r.error){ alert("Eval: "+r.error); return; }
+  evalTick();
+});
+$("#evalStopBtn").addEventListener("click", async ()=>{ if(curRun) await POST("/api/eval_stop",{id:curRun}); evalTick(); });
+$("#analyzeBtn").addEventListener("click", async ()=>{
+  if(!curRun){ alert("Select a run first."); return; }
+  const r=await POST("/api/analyze",{id:curRun});
+  if(r.error){ alert("Analyze: "+r.error); return; }
+  dataTick();
+});
+setInterval(()=>{ $("#clock").textContent=new Date().toLocaleTimeString(); }, 1000);
+
+(async function init(){
+  DEFAULTS=await j("/api/defaults");
+  buildForm(DEFAULTS); buildEvalForm(DEFAULTS); initCharts();
+  await refreshRunList();
+  const sel=$("#runSel"); if(sel.options.length) selectRun(sel.value);
+  loop(); setInterval(loop, 1500);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+# jax_az dependencies (tested versions).
+# On Google Colab, jax/jaxlib ship preinstalled with CUDA — installing these
+# CPU wheels there is fine for the env code, but for GPU keep Colab's jax and
+# install the rest: `pip install flax optax orbax-checkpoint mctx`.
+jax==0.10.2
+jaxlib==0.10.2
+flax==0.12.7
+optax==0.2.8
+orbax-checkpoint==0.12.1
+mctx==0.0.71
+numpy==2.5.0

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Training/eval artifacts
+jax_az_runs/
+resume/
+checkpoints/
+*.npz
+
+# Claude / assistant files
+.claude/
+.claude*/
+CLAUDE.md
+CLAUDE.local.md
+.mcp.json
+.claudeignore
+memory/
+
+# OS
+.DS_Store
