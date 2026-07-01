@@ -12,9 +12,11 @@ set -e
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"   # the jax_az package dir
 
 if [ -d /content ] || [ -n "${COLAB_GPU:-}" ]; then
-    # Colab already ships jax/jaxlib(+CUDA) and numpy — keep them so GPU works.
-    echo "[setup] Colab detected: keeping preinstalled jax, installing the rest."
-    pip install -q flax==0.12.7 optax==0.2.8 orbax-checkpoint==0.12.1 mctx==0.0.71
+    # Colab's preinstalled jax is older; flax==0.12.7 bumps jaxlib to 0.10.2 but
+    # leaves the CUDA plugin stale -> PJRT mismatch. Install jax[cuda12]==0.10.2
+    # so jax, jaxlib and jax-cuda12-plugin all align (GPU stays working).
+    echo "[setup] Colab detected: aligning jax[cuda12]==0.10.2 + installing the rest."
+    pip install -q -U "jax[cuda12]==0.10.2" flax==0.12.7 optax==0.2.8 orbax-checkpoint==0.12.1 mctx==0.0.71
 else
     pip install -q -r "$HERE/requirements.txt"
 fi
